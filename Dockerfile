@@ -1,15 +1,34 @@
-FROM gcr.io/deeplearning-platform-release/tf-cpu.1-15
+FROM tensorflow/tensorflow:1.12.0-gpu-py3
+MAINTAINER Ankur Debnath, Cheif Architect
 
-WORKDIR /neogpt
+# nvidia-docker 1.0
+LABEL com.nvidia.volumes.needed="nvidia_driver"
+LABEL com.nvidia.cuda.version="${CUDA_VERSION}"
 
-# Make RUN commands use `bash --login`:
-SHELL ["/bin/bash", "--login", "-c"]
-ENV DEBIAN_FRONTEND=noninteractive 
-RUN apt-get update -y && apt-get install tmux -y
-RUN conda install gcc_linux-64 gxx_linux-64 -y 
-ADD requirements.txt .
-RUN pip install -r requirements.txt 
-RUN apt-get install screen htop -y
-RUN python -m pip install tensorboard==1.15 cloud_tpu_profiler==1.15
+# nvidia-container-runtime
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    NVIDIA_REQUIRE_CUDA="cuda>=8.0" \
+    LANG=C.UTF-8
 
-CMD tmux
+EXPOSE 8000
+RUN apt-get update && apt-get install -y apache2 apache2-dev vim \
+    && apt-get clean \
+    && apt-get autoremove \
+    && rm -rf /var/lib/api/lists/*
+
+RUN mkdir /core_lm
+WORKDIR /core_lm
+ADD . /core_lm
+
+RUN pip3 install -r requirements.txt
+
+RUN python3 model_utils.py 'threapymodel/top_model'
+
+RUN /opt/conda/bin/mod_wsgi-express install-module
+RUN mod_wsgi-express setup-server core_lm.wsgi --port=8000 \
+    --user www-data --group www-data \
+    --server-root=/etc/mod_wsgi-express-80
+    
+RUN python3 concatconfigfile.py
+CMD /etc/mod_wsgi-express-80/apachectl start -D FOREGROUND
